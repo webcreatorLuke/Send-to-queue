@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowQ Queue Sender</title>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--tx:#1b1f2a;--mut:#6b7280;--ac:#2563eb;--ok:#16a34a;--err:#dc2626;--bd:#e3e6ee}
+@media (prefers-color-scheme:dark){:root{--bg:#12141a;--card:#1c1f28;--tx:#e8eaf0;--mut:#98a0b3;--ac:#4f8cff;--bd:#2c3140}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+h1{font-size:18px;margin:0;flex:1}
+.stat{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:6px 12px;font-size:13px}
+.stat b{font-size:16px}
+button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:8px 14px;background:var(--ac);color:#fff}
+button.sec{background:var(--bg);color:var(--tx);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:default}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.panel{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+.panel h2{margin:0 0 10px;font-size:16px}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{font-family:ui-monospace,monospace;font-size:13px;min-height:60px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{font-size:12px;color:var(--mut);margin-top:6px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.file{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.file .n{font-weight:600;word-break:break-word}.file .m{font-size:12px;color:var(--mut)}
+.file .act{display:flex;gap:8px;margin-top:auto}.file .act input{width:64px}
+.file .act button{flex:1}
+.added{color:var(--ok);font-size:12px;min-height:16px}
+#msg{padding:10px 14px;border-radius:8px;margin-bottom:16px;display:none}
+#msg.ok{display:block;background:#16a34a22;color:var(--ok)}#msg.err{display:block;background:#dc262622;color:var(--err)}
+pre{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;overflow:auto;max-height:220px;font-size:12px;margin:8px 0 0}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>FlowQ Queue Sender</h1>
+  <div class="stat">Added this session: <b id="sess">0</b></div>
+  <div class="stat">All time: <b id="total">0</b></div>
+  <button class="sec" id="btnSettings">Settings</button>
+  <button id="btnLoad">Load files</button>
+</header>
+<main>
+  <div id="msg"></div>
+
+  <section class="panel hide" id="settings">
+    <h2>Settings</h2>
+    <label>FlowQ API key secret (FlowQ → Settings → API)</label>
+    <input id="key" type="password" autocomplete="off" placeholder="paste your API key secret">
+    <div class="row">
+      <div><label>API base URL</label><input id="base" value="https://api.infinityflow3d.com"></div>
+      <div><label>Auth header</label>
+        <select id="auth"><option value="x-api-key">X-API-Key: key</option><option value="bearer">Authorization: Bearer key</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>List print files — GET path</label><input id="listPath" value="/print-files"></div>
+      <div><label>Add to queue — POST path</label><input id="addPath" value="/queue"></div>
+    </div>
+    <label>Add-to-queue JSON body (use {{id}} and {{quantity}})</label>
+    <textarea id="body">{"print_file_id":"{{id}}","quantity":{{quantity}}}</textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button id="btnSave">Save</button>
+      <button class="sec" id="btnDetect">Auto-detect endpoints from API docs</button>
+      <button class="sec" id="btnReset">Reset all-time counter</button>
+    </div>
+    <div class="hint">Saved only in this browser (localStorage). The endpoint paths above are my best guesses — the FlowQ docs page didn't load for me, so press Auto-detect (or check <a href="https://api.infinityflow3d.com/docs" target="_blank" rel="noopener">api.infinityflow3d.com/docs</a>) and fix them if a request fails.</div>
+    <pre id="log" class="hide"></pre>
+  </section>
+
+  <div id="grid"></div>
+  <p class="hint" id="empty">Open Settings, paste your key, then press Load files.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const ST=(()=>{try{localStorage.setItem('t','1');localStorage.removeItem('t');return localStorage}catch(e){return {getItem:()=>null,setItem(){},removeItem(){}}}})();
+const cfg={key:'',base:'https://api.infinityflow3d.com',auth:'x-api-key',listPath:'/print-files',addPath:'/queue',body:$('body').value};
+try{Object.assign(cfg,JSON.parse(ST.getItem('flowq-cfg')||'{}'))}catch(e){}
+let sess=0,total=+ST.getItem('flowq-total')||0,files=[];
+function fill(){['key','base','auth','listPath','addPath','body'].forEach(k=>$(k).value=cfg[k]);$('total').textContent=total}
+function save(){['key','base','auth','listPath','addPath','body'].forEach(k=>cfg[k]=$(k).value.trim());ST.setItem('flowq-cfg',JSON.stringify(cfg))}
+function msg(t,c){const m=$('msg');m.textContent=t;m.className=c||''; if(!t)m.style.display='none'}
+function log(t){const l=$('log');l.classList.remove('hide');l.textContent=t}
+function headers(){const h={'Accept':'application/json'};if(cfg.auth==='bearer')h.Authorization='Bearer '+cfg.key;else h['X-API-Key']=cfg.key;return h}
+const url=p=>cfg.base.replace(/\/$/,'')+(p.startsWith('/')?p:'/'+p);
+async function call(method,path,body){
+  const opt={method,headers:headers()};
+  if(body){opt.headers['Content-Type']='application/json';opt.body=body}
+  let r;
+  try{r=await fetch(url(path),opt)}catch(e){throw new Error('Network/CORS error calling '+url(path)+'. If the key is right, the API may block browser requests from this site — see the note in the reply.')}
+  const txt=await r.text();
+  log(method+' '+url(path)+'\n→ '+r.status+'\n'+txt.slice(0,1500));
+  if(!r.ok)throw new Error(method+' '+path+' failed ('+r.status+'). Check the key and endpoint paths in Settings.');
+  try{return JSON.parse(txt)}catch(e){return txt}
+}
+const pick=(o,ks)=>{for(const k of ks)if(o&&o[k]!=null)return o[k]};
+function toList(d){if(Array.isArray(d))return d;for(const k of ['items','data','results','print_files','printFiles','files']){if(Array.isArray(d&&d[k]))return d[k]}return[]}
+function render(){
+  const g=$('grid');g.innerHTML='';$('empty').style.display=files.length?'none':'block';
+  files.forEach((f,i)=>{
+    const id=pick(f,['id','uuid','_id','print_file_id']);
+    const name=pick(f,['name','file_name','filename','title'])||('File '+id);
+    const meta=[pick(f,['printer_model','printer','material','filament']),pick(f,['print_time','estimated_time'])].filter(Boolean).join(' · ');
+    const d=document.createElement('div');d.className='file';
+    d.innerHTML='<div class="n"></div><div class="m"></div><div class="added"></div><div class="act"><input type="number" min="1" value="1" title="Quantity"><button>Add to queue</button></div>';
+    d.querySelector('.n').textContent=name;d.querySelector('.m').textContent=meta||('ID '+id);
+    const btn=d.querySelector('button'),qty=d.querySelector('input'),ad=d.querySelector('.added');
+    let n=0;
+    btn.onclick=async()=>{
+      const q=Math.max(1,parseInt(qty.value)||1);btn.disabled=true;btn.textContent='Adding…';
+      try{
+        const b=cfg.body.replace(/\{\{id\}\}/g,id).replace(/\{\{quantity\}\}/g,q);
+        JSON.parse(b);
+        await call('POST',cfg.addPath,b);
+        n+=q;sess+=q;total+=q;ST.setItem('flowq-total',total);
+        $('sess').textContent=sess;$('total').textContent=total;
+        ad.textContent='✓ '+n+' added from here';msg('Added "'+name+'" ×'+q+' to the queue.','ok');
+      }catch(e){msg(e.message,'err')}
+      btn.disabled=false;btn.textContent='Add to queue';
+    };
+    g.appendChild(d);
+  });
+}
+async function load(){
+  save();
+  if(!cfg.key){$('settings').classList.remove('hide');return msg('Paste your FlowQ API key in Settings first.','err')}
+  msg('Loading…');$('btnLoad').disabled=true;
+  try{const d=await call('GET',cfg.listPath);files=toList(d);msg(files.length?'Loaded '+files.length+' print files.':'Connected, but no print files were found in the response (see the log in Settings).',files.length?'ok':'err');render()}
+  catch(e){msg(e.message,'err');$('settings').classList.remove('hide')}
+  $('btnLoad').disabled=false;
+}
+async function detect(){
+  save();msg('Reading API docs…');
+  try{
+    const r=await fetch(url('/openapi.json'));if(!r.ok)throw new Error(r.status);
+    const spec=await r.json();const P=spec.paths||{};
+    const ref=s=>{if(s&&s.$ref){return s.$ref.replace('#/','').split('/').reduce((o,k)=>o&&o[k],spec)}return s};
+    const keys=Object.keys(P);
+    const list=keys.find(p=>/print[-_]?files?\/?$/i.test(p)&&P[p].get);
+    const adds=keys.filter(p=>/queue/i.test(p)&&P[p].post&&!/\{/.test(p)).concat(keys.filter(p=>/queue/i.test(p)&&P[p].post));
+    if(list)$('listPath').value=list;
+    let note='Print file list: '+(list||'not found')+'\nPOST queue candidates:\n'+adds.join('\n');
+    if(adds[0]){
+      $('addPath').value=adds[0];
+      const sc=ref(((P[adds[0]].post.requestBody||{}).content||{})['application/json']||{}).schema;
+      const s=ref(sc),props=s&&s.properties;
+      if(props){const o={};for(const k of Object.keys(props)){
+        if(/(file|print).*id$|^id$|file_id|print_file/i.test(k))o[k]='{{id}}';
+        else if(/quantity|count|iteration|copies|repeat/i.test(k))o[k]='__Q__';
+        else if(s.required&&s.required.includes(k))o[k]=null}
+        $('body').value=JSON.stringify(o).replace('"__Q__"','{{quantity}}');
+        note+='\nBody fields: '+Object.keys(props).join(', ')}
+    }
+    log(note);save();msg('Auto-detect finished — review the paths and body below, then Load files.','ok');
+  }catch(e){msg('Could not read /openapi.json from the browser ('+e.message+'). Copy the paths from the API docs page instead.','err')}
+}
+$('btnSettings').onclick=()=>$('settings').classList.toggle('hide');
+$('btnSave').onclick=()=>{save();msg('Settings saved.','ok')};
+$('btnLoad').onclick=load;$('btnDetect').onclick=detect;
+$('btnReset').onclick=()=>{total=0;ST.setItem('flowq-total',0);$('total').textContent=0};
+fill();if(!cfg.key)$('settings').classList.remove('hide');
+</script>
+</body>
+</html>
