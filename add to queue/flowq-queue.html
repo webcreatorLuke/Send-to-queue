@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowQ Queue Sender</title>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--tx:#1b1f2a;--mut:#6b7280;--ac:#2563eb;--ok:#16a34a;--err:#dc2626;--bd:#e3e6ee}
+@media (prefers-color-scheme:dark){:root{--bg:#12141a;--card:#1c1f28;--tx:#e8eaf0;--mut:#98a0b3;--ac:#4f8cff;--bd:#2c3140}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+h1{font-size:18px;margin:0;flex:1}
+.stat{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:6px 12px;font-size:13px}
+.stat b{font-size:16px}
+button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:8px 14px;background:var(--ac);color:#fff}
+button.sec{background:var(--bg);color:var(--tx);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:default}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.panel{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+.panel h2{margin:0 0 10px;font-size:16px}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{font-family:ui-monospace,monospace;font-size:13px;min-height:60px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{font-size:12px;color:var(--mut);margin-top:6px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.file{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.file .n{font-weight:600;word-break:break-word}.file .m{font-size:12px;color:var(--mut)}
+.file .act{display:flex;gap:8px;margin-top:auto}.file .act input{width:64px}
+.file .act button{flex:1}
+.added{color:var(--ok);font-size:12px;min-height:16px}
+#msg{padding:10px 14px;border-radius:8px;margin-bottom:16px;display:none}
+#msg.ok{display:block;background:#16a34a22;color:var(--ok)}#msg.err{display:block;background:#dc262622;color:var(--err)}
+pre{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;overflow:auto;max-height:420px;font-size:12px;margin:8px 0 0;user-select:text;white-space:pre-wrap}
+.hide{display:none}
+
+.tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:12px}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--bd);font-size:12px}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+h3{font-size:14px;color:var(--mut);margin:16px 0 8px}
+.row2{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.grow{flex:1;min-width:0}.pos{font-weight:700;color:var(--mut);width:34px}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid var(--bd);margin-right:6px;vertical-align:middle}
+.cam img{width:100%;border-radius:8px;margin-bottom:6px}.cam input{font-size:12px}
+.act2{display:flex;gap:6px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>FlowQ Queue Sender</h1>
+  <div class="stat">Added this session: <b id="sess">0</b></div>
+  <div class="stat">All time: <b id="total">0</b></div>
+  <button class="sec" id="btnSettings">Settings</button>
+  <button id="btnLoad">Load files</button>
+</header>
+<main>
+  <div id="msg"></div>
+
+  <section class="panel hide" id="settings">
+    <h2>Settings</h2>
+    <label>FlowQ API key secret (FlowQ → Settings → API)</label>
+    <input id="key" type="password" autocomplete="off" placeholder="paste your API key secret">
+    <div class="row">
+      <div><label>API base URL</label><input id="base" value="/proxy"></div>
+      <div><label>Auth header</label>
+        <select id="auth"><option value="bearer" selected>Authorization: Bearer key</option><option value="x-api-key">X-API-Key: key</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>List print files — GET path</label><input id="listPath" value="/public/v1/queue/files"></div>
+      <div><label>Add to queue — POST path</label><input id="addPath" value="/public/v1/queue/enqueue"></div>
+    </div>
+    <label>Add-to-queue JSON body (use {{id}} and {{quantity}})</label>
+    <textarea id="body">[{"print_file_id":"{{id}}","iterations":{{quantity}},"infinite":false,"sticky":false,"override":true,"autoclear":false,"auto_switch_filament":false,"flow_cali":false,"filament_profile_ids":[],"printer_tag_ids":[],"printer_tag_match_mode":"all","allowed_printer_ids":[]}]</textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button id="btnSave">Save</button>
+      <button class="sec" id="btnDetect">Auto-detect endpoints from API docs</button>
+      <button class="sec" id="btnDefaults">Restore default settings</button>
+      <button class="sec" id="btnCopy">Copy log</button>
+      <button class="sec" id="btnReset">Reset all-time counter</button>
+    </div>
+    <div class="hint">Saved only in this browser (localStorage). The other settings are already set to FlowQ's public API — use Auto-detect or Restore default settings only if something stops working.</div>
+    <pre id="log" class="hide"></pre>
+  </section>
+
+  <div class="tabs">
+    <button class="sec on" id="tab-files">Files</button><button class="sec" id="tab-printers">Printers</button>
+    <button class="sec" id="tab-queue">Queue</button><button class="sec" id="tab-filament">Filament</button>
+  </div>
+  <div id="pane-files"><div id="grid"></div>
+  <p class="hint" id="empty">Open Settings, paste your key, then press Load files.</p></div>
+  <div id="pane-printers" class="hide"></div>
+  <div id="pane-queue" class="hide"></div>
+  <div id="pane-filament" class="hide"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const ST=(()=>{try{localStorage.setItem('t','1');localStorage.removeItem('t');return localStorage}catch(e){return {getItem:()=>null,setItem(){},removeItem(){}}}})();
+const cfg={key:'',base:'/proxy',auth:'bearer',listPath:'/public/v1/queue/files',addPath:'/public/v1/queue/enqueue',body:$('body').value};
+try{Object.assign(cfg,JSON.parse(ST.getItem('flowq-cfg')||'{}'))}catch(e){}
+const D={base:'/proxy',auth:'bearer',listPath:'/public/v1/queue/files',addPath:'/public/v1/queue/enqueue',body:$('body').value};
+if((cfg.v||0)<3){Object.assign(cfg,D);cfg.v=3}
+let sess=0,total=+ST.getItem('flowq-total')||0,files=[];
+function fill(){['key','base','auth','listPath','addPath','body'].forEach(k=>$(k).value=cfg[k]);$('total').textContent=total}
+function save(){['key','base','auth','listPath','addPath','body'].forEach(k=>cfg[k]=$(k).value.trim());ST.setItem('flowq-cfg',JSON.stringify(cfg))}
+function msg(t,c){const m=$('msg');m.textContent=t;m.className=c||''; if(!t)m.style.display='none'}
+function log(t){const l=$('log');l.classList.remove('hide');l.textContent=t}
+function headers(st){const h={'Accept':'application/json'};if((st||cfg.auth)==='bearer')h.Authorization='Bearer '+cfg.key;else h['X-API-Key']=cfg.key;return h}
+const url=p=>cfg.base.replace(/\/$/,'')+(p.startsWith('/')?p:'/'+p);
+async function call(method,path,body){
+  const styles=[cfg.auth,cfg.auth==='bearer'?'x-api-key':'bearer'];
+  let r,txt,used=cfg.auth;
+  for(const st of styles){
+    used=st;
+    const opt={method,headers:headers(st)};
+    if(body){opt.headers['Content-Type']='application/json';opt.body=body}
+    try{r=await fetch(url(path),opt)}catch(e){throw new Error('Could not reach the proxy. Start it with: node server.js, then open http://localhost:3000 (not the file directly).')}
+    txt=await r.text();
+    if(![401,403,498].includes(r.status))break;
+  }
+  log(method+' '+url(path)+(body?'\nSENT: '+body:'')+'\n→ '+r.status+'\nRESPONSE: '+txt.slice(0,1500));
+  if(!r.ok)throw new Error(method+' '+path+' failed ('+r.status+'). '+([401,403,498].includes(r.status)?'The key was rejected with both header styles. Either the key is wrong, or these website paths do not accept API keys — press Auto-detect to find the public API paths.':(r.status===400||r.status===422?'FlowQ says: '+txt.slice(0,400):'Check the endpoint path in Settings.')));
+  if(used!==cfg.auth){cfg.auth=used;$('auth').value=used;save()}
+  try{return JSON.parse(txt)}catch(e){return txt}
+}
+const pick=(o,ks)=>{for(const k of ks)if(o&&o[k]!=null)return o[k]};
+function toList(d){if(Array.isArray(d))return d;for(const k of ['items','data','results','print_files','printFiles','files']){if(Array.isArray(d&&d[k]))return d[k]}return[]}
+function render(){
+  const g=$('grid');g.innerHTML='';$('empty').style.display=files.length?'none':'block';
+  files.forEach((f,i)=>{
+    const id=pick(f,['id','uuid','_id','print_file_id']);
+    const name=pick(f,['name','file_name','filename','title'])||('File '+id);
+    const dur=pick(f,['duration','print_time','estimated_time']);const dt=typeof dur==='number'&&dur>0?(Math.floor(dur/3600)?Math.floor(dur/3600)+'h ':'')+Math.round(dur%3600/60)+'m':'';const meta=[pick(f,['printer_model','printer']),dt,pick(f,['folder_path'])].filter(Boolean).join(' · ');
+    const d=document.createElement('div');d.className='file';
+    d.innerHTML='<div class="n"></div><div class="m"></div><div class="added"></div><div class="act"><input type="number" min="1" value="1" title="Quantity"><button>Add to queue</button></div>';
+    d.querySelector('.n').textContent=name;d.querySelector('.m').textContent=meta||('ID '+id);
+    const btn=d.querySelector('button'),qty=d.querySelector('input'),ad=d.querySelector('.added');
+    let n=0;
+    btn.onclick=async()=>{
+      const q=Math.max(1,parseInt(qty.value)||1);btn.disabled=true;btn.textContent='Adding…';
+      try{
+        const b=cfg.body.replace(/"\{\{id\}\}"/g,JSON.stringify(id)).replace(/\{\{id\}\}/g,id).replace(/\{\{quantity\}\}/g,q);
+        JSON.parse(b);
+        const resp=await call('POST',cfg.addPath,b);window.lastAddResp=typeof resp==='string'?resp:JSON.stringify(resp);
+        n+=q;sess+=q;total+=q;ST.setItem('flowq-total',total);
+        $('sess').textContent=sess;$('total').textContent=total;
+        ad.textContent='✓ '+n+' added from here';msg('FlowQ accepted "'+name+'" ×'+q+'. Reply: '+(window.lastAddResp||'(empty)').slice(0,200)+' — if it is not in your queue, open Settings and copy the log to me.','ok');
+      }catch(e){msg(e.message,'err')}
+      btn.disabled=false;btn.textContent='Add to queue';
+    };
+    g.appendChild(d);
+  });
+}
+async function load(){
+  save();
+  if(!cfg.key){$('settings').classList.remove('hide');return msg('Paste your FlowQ API key in Settings first.','err')}
+  $('btnLoad').disabled=true;
+  const stale=/\/api\/v\d\/hub\//.test(cfg.listPath);
+  let detected=false;
+  if(stale){msg('Looking up the public API paths…');detected=await detect();save()}
+  msg('Loading…');
+  try{
+    let d;
+    try{d=await call('GET',cfg.listPath)}
+    catch(e){
+      if(!detected&&/\((404|498|401|403)\)/.test(e.message)){
+        msg('That path was rejected — looking up the public API paths…');
+        if(await detect()){save();d=await call('GET',cfg.listPath)}else throw e;
+      }else throw e;
+    }
+    files=toList(d);
+    msg(files.length?'Loaded '+files.length+' print files.':'Connected, but no print files were found in the response (see the log in Settings).',files.length?'ok':'err');render();
+  }catch(e){msg(e.message,'err');$('settings').classList.remove('hide')}
+  $('btnLoad').disabled=false;
+}
+/*HELPERS*/
+function yamlPaths(t){
+  const L=t.split('\n');let i=L.findIndex(l=>/^paths:\s*$/.test(l));const P={};if(i<0)return P;
+  let cur=null,m=null;
+  for(i++;i<L.length;i++){
+    const l=L[i];if(/^\S/.test(l))break;
+    let a=l.match(/^  ['"]?(\/[^'"\s]*?)['"]?:\s*$/);if(a){cur=a[1];P[cur]={};m=null;continue}
+    a=l.match(/^    (get|post|put|patch|delete):\s*$/);if(a&&cur){m=a[1];P[cur][m]=[];continue}
+    if(cur&&m)P[cur][m].push(l);
+  }
+  return P;
+}
+function yamlSchema(t,name){
+  const L=t.split('\n');const i=L.findIndex(l=>new RegExp('^    [\'"]?'+name+'[\'"]?:\\s*$').test(l));if(i<0)return[];
+  const o=[];for(let k=i+1;k<L.length;k++){if(L[k].trim()&&!/^     /.test(L[k]))break;o.push(L[k])}return o;
+}
+function yamlBody(t,block){
+  const rb=block.findIndex(l=>/requestBody:/.test(l));if(rb<0)return null;
+  let ref=null;for(let k=rb;k<block.length;k++){const m=block[k].match(/#\/components\/schemas\/([\w.\-]+)/);if(m){ref=m[1];break}}
+  if(!ref)return null;
+  let sc=yamlSchema(t,ref),arr=false,ref2=null;
+  if(sc.some(l=>/^\s+type:\s*array/.test(l))){const it=sc.map(l=>l.match(/#\/components\/schemas\/([\w.\-]+)/)).find(Boolean);if(it){arr=true;ref2=it[1];sc=yamlSchema(t,it[1])}}
+  const pi=sc.findIndex(l=>/^\s+properties:\s*$/.test(l));if(pi<0)return{props:[],arr,ref,ref2};
+  const ind=sc[pi].match(/^\s*/)[0].length,props=[];
+  for(let k=pi+1;k<sc.length;k++){const l=sc[k],n=l.match(/^\s*/)[0].length;if(l.trim()&&n<=ind)break;const m=l.match(/^\s*([A-Za-z_]\w*):/);if(m&&n===ind+2)props.push(m[1])}
+  return{props,arr,ref,ref2};
+}
+function pickPaths(P){
+  const keys=Object.keys(P);let list=null,ls=0,add=null,as=0;
+  for(const p of keys){
+    if(/\{/.test(p))continue;
+    if(P[p].get){let sc=0;if(/file/i.test(p))sc+=3;if(/print/i.test(p))sc+=2;if(/folder/i.test(p))sc-=3;if(sc>ls){ls=sc;list=p}}
+    if(P[p].post){let sc=0;if(/enqueue/i.test(p))sc+=5;else if(/queue/i.test(p))sc+=3;if(/job|task/i.test(p))sc+=1;if(/remove|delete|reorder|pause|resume|stop|clear/i.test(p))sc-=5;if(sc>as){as=sc;add=p}}
+  }
+  return{list,add};
+}
+function buildBody(props,arr){
+  const D={infinite:false,sticky:false,override:true,autoclear:false,auto_switch_filament:false,flow_cali:false,filament_profile_ids:[],printer_tag_ids:[],printer_tag_match_mode:'all',allowed_printer_ids:[],clearing_gcode_id:null,prepend:false};
+  const o={};
+  for(const k of props){
+    if(/(print|file|job).*id$|^id$/i.test(k)&&!/printer|folder|filament|tag|gcode/i.test(k))o[k]='{{id}}';
+    else if(/quantity|count|iteration|copies|repeat/i.test(k))o[k]='__Q__';
+    else if(k in D)o[k]=D[k];
+  }
+  let j=JSON.stringify(o).replace('"__Q__"','{{quantity}}');
+  return arr?'['+j+']':j;
+}
+/*END*/
+async function detect(){
+  save();msg('Reading API docs…');
+  try{
+    const cands=['/schema','/openapi.json','/swagger.json','/api/openapi.json','/v1/openapi.json','/api/v1/openapi.json'];
+    let text='',found='';
+    for(const c of cands){
+      try{const r=await fetch(url(c),{headers:Object.assign(headers(),{'Accept':'application/vnd.oai.openapi+json, application/json;q=0.9, */*;q=0.5'})});
+        if(!r.ok)continue;const t=await r.text();if(/"paths"|^paths:/m.test(t)){text=t;found=c;break}}catch(e){}
+    }
+    if(!text)throw new Error('no API spec found');
+    let P={},body=null,json=null;
+    try{json=JSON.parse(text)}catch(e){}
+    if(json){
+      for(const k of Object.keys(json.paths||{})){P[k]={};for(const m of Object.keys(json.paths[k]))if(/^(get|post|put|patch|delete)$/.test(m))P[k][m]=json.paths[k][m]}
+    }else P=yamlPaths(text);
+    const {list,add}=pickPaths(P);
+    if(list)$('listPath').value=list+(/\?/.test(list)?'':'');
+    if(add)$('addPath').value=add;
+    let note='Spec found at '+found+' ('+(json?'JSON':'YAML')+')\n\nAll paths:\n'+Object.keys(P).map(k=>Object.keys(P[k]).map(m=>m.toUpperCase()).join('/')+' '+k).join('\n');
+    note+='\n\nPicked list: '+(list||'NOT FOUND')+'\nPicked add: '+(add||'NOT FOUND');
+    if(add){
+      if(json){
+        const ref=s=>{if(s&&s.$ref)return s.$ref.replace('#/','').split('/').reduce((o,k)=>o&&o[k],json);return s};
+        let sc=ref(((P[add].post.requestBody||{}).content||{})['application/json']||{}).schema;sc=ref(sc);
+        let arr=false;if(sc&&sc.type==='array'){arr=true;sc=ref(sc.items)}
+        if(sc&&sc.properties)body={props:Object.keys(sc.properties),arr};
+      }else body=yamlBody(text,P[add].post);
+      if(body&&body.props.length){$('body').value=buildBody(body.props,body.arr);note+='\nBody fields: '+body.props.join(', ')+(body.arr?' (array body)':'')}
+      else note+='\nCould not read the request body fields — keeping the current body.';
+    }
+    if(add){
+      if(json){note+='\n\nPOST spec:\n'+JSON.stringify(P[add].post,null,1).slice(0,3000)}
+      else{note+='\n\nPOST spec:\n'+P[add].post.join('\n').slice(0,2500);
+        if(body&&body.ref)note+='\n\nSchema '+body.ref+':\n'+yamlSchema(text,body.ref).join('\n').slice(0,2000);
+        if(body&&body.ref2)note+='\n\nSchema '+body.ref2+':\n'+yamlSchema(text,body.ref2).join('\n').slice(0,2500)}
+    }
+    log(note);save();
+    msg(list&&add?'Auto-detect finished — paths filled in.':'Spec found but I could not pick both paths — paste the log from Settings to me.',list&&add?'ok':'err');
+    return !!(list&&add);
+  }catch(e){msg('Could not read the API spec ('+e.message+'). Paste the paths from the docs page instead.','err');return false}
+}
+/*PRINTERS*/
+const API={idle:'/public/v1/printer/idle',active:'/public/v1/printer/active',ready:'/public/v1/printer/ready',inv:'/public/v1/inventory/filament',tasks:'/public/v1/queue/tasks'};
+let cur='files';
+const esc=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hexc=c=>/^[0-9a-f]{3,8}$/i.test(c||'')?'#'+c:(c||'#999');
+const dur2=s=>s==null?'—':(Math.floor(s/3600)?Math.floor(s/3600)+'h ':'')+Math.round(s%3600/60)+'m';
+const arr=d=>Array.isArray(d)?d:toList(d);
+function cams(){try{return JSON.parse(ST.getItem('flowq-cams')||'{}')}catch(e){return{}}}
+function pushCams(c){try{return fetch('/store',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cams:c})}).catch(()=>{})}catch(e){}}
+async function syncCams(){try{const r=await fetch('/store');if(!r.ok)return;const j=await r.json();if(j&&j.cams&&Object.keys(j.cams).length)ST.setItem('flowq-cams',JSON.stringify(j.cams));else{const c=cams();if(Object.keys(c).length)pushCams(c)}}catch(e){}}
+const camsReady=syncCams();
+function setCam(n,u){const c=cams();if(u)c[n]=u;else delete c[n];ST.setItem('flowq-cams',JSON.stringify(c));return pushCams(c)}
+function camSrc(u){const m=/^bambu:\s*([\d.]+)\s*[:,\s]\s*(\S+)$/i.exec(u||'');return m?'/camera/bambu?ip='+encodeURIComponent(m[1])+'&code='+encodeURIComponent(m[2]):(u||'')}
+function camHtml(name){const u=cams()[name]||'';return '<div class="cam">'+(u?'<img src="'+esc(camSrc(u))+'" alt="camera">':'')+'<input placeholder="Camera: stream link, or bambu:PRINTER-IP:ACCESS-CODE" value="'+esc(u)+'" data-cam="'+esc(name)+'"></div>'}
+async function loadPrinters(){
+  await camsReady;
+  const [idle,act]=await Promise.all([call('GET',API.idle),call('GET',API.active)]);
+  const I=arr(idle),A=arr(act);
+  let h='<div class="bar"><b>Printers</b><button class="sec" data-act="refresh">Refresh</button></div><h3>Idle / online</h3>';
+  h+=I.length?'':'<p class="hint">No idle printers online right now.</p>';
+  h+='<div class="cards">'+I.map(p=>'<div class="file"><div class="n">'+esc(p.name)+'</div><div class="m"><span class="badge">'+esc(p.status||'unknown')+'</span></div>'+camHtml(p.name)+'<div class="act"><button data-ready="'+esc(p.id)+'">Ready up</button></div></div>').join('')+'</div>';
+  h+='<h3>Printing now</h3>'+(A.length?'':'<p class="hint">Nothing is printing right now.</p>');
+  h+='<div class="cards">'+A.map(j=>'<div class="file"><div class="n">'+esc(j.printer_name)+'</div><div class="m">'+esc(j.file||'(not started from FlowQ)')+'</div><div class="m"><span class="badge">'+esc(j.status||'')+'</span> · '+dur2(j.time_left)+' left</div>'+camHtml(j.printer_name)+'</div>').join('')+'</div>';
+  h+='<p class="hint">FlowQ does not report temperatures, filament in use or light control for printers, so those are not shown. Camera boxes show any stream link you paste (e.g. an MJPEG URL).</p>';
+  $('pane-printers').innerHTML=h;
+}
+async function loadQueue(){
+  const q=arr(await call('GET',API.tasks)).sort((a,b)=>(a.position||0)-(b.position||0));
+  let h='<div class="bar"><b>Queue ('+q.length+')</b><button class="sec" data-act="refresh">Refresh</button></div>';
+  if(!q.length)h+='<p class="hint">The queue is empty.</p>';
+  h+=q.map(t=>{
+    const left=t.infinite?'∞':Math.max(0,(t.iterations||0)-(t.curr_iteration||1)+1);
+    const fil=(t.filaments||[]).map(f=>'<span class="dot" style="background:'+esc(hexc(f.color))+'"></span>'+esc(f.name||f.material)).join(' ');
+    const flags=[t.sticky&&'sticky',t.infinite&&'infinite',t.override&&'replace file',t.autoclear&&'autoclear'].filter(Boolean).join(', ');
+    const dis=(t.infinite||left<=1)?' disabled':'';
+    return '<div class="row2"><div class="pos">#'+esc(t.position)+'</div><div class="grow"><div class="n">'+esc(t.print_file_name)+'</div><div class="m">Runs left: '+left+(flags?' · '+esc(flags):'')+'</div><div class="m">'+fil+'</div></div><div class="act2"><button class="sec" data-task="'+esc(t.id)+'" data-it="'+(+t.iterations||0)+'" data-op="dec"'+dis+'>−1 run</button><button class="sec" data-task="'+esc(t.id)+'" data-it="'+(+t.iterations||0)+'" data-op="inc"'+(t.infinite?' disabled':'')+'>+1 run</button><button class="sec" data-task="'+esc(t.id)+'" data-op="del">Remove</button></div></div>';
+  }).join('');
+  $('pane-queue').innerHTML=h;
+}
+async function loadFilament(){
+  const v=arr(await call('GET',API.inv)).sort((a,b)=>String((a.filament||{}).name).localeCompare(String((b.filament||{}).name)));
+  let h='<div class="bar"><b>Filament inventory</b><button class="sec" data-act="refresh">Refresh</button></div>';
+  if(!v.length)h+='<p class="hint">No filament in your FlowQ inventory.</p>';
+  h+='<div class="cards">'+v.map(i=>{const f=i.filament||{};return '<div class="file"><div><span class="dot" style="background:'+esc(hexc(f.color))+'"></span><b>'+esc(f.name)+'</b></div><div class="m">'+esc(f.material)+(i.sku?' · '+esc(i.sku):'')+(f.roll_size?' · roll '+esc(f.roll_size):'')+'</div><div class="n">'+(typeof i.inventory==='number'?i.inventory.toFixed(2):esc(i.inventory))+' kg left</div></div>'}).join('')+'</div>';
+  $('pane-filament').innerHTML=h;
+}
+async function refresh(t){
+  try{
+    if(t==='printers')await loadPrinters();else if(t==='queue')await loadQueue();else if(t==='filament')await loadFilament();else await load();
+  }catch(e){msg(e.message,'err')}
+}
+function tab(t){cur=t;['files','printers','queue','filament'].forEach(x=>{$('tab-'+x).classList.toggle('on',x===t);$('pane-'+x).classList.toggle('hide',x!==t)});if(t!=='files'){if(!cfg.key){$('settings').classList.remove('hide');return msg('Paste your FlowQ API key in Settings first.','err')}refresh(t)}}
+async function onAction(t){
+  if(t.dataset.act==='refresh')return refresh(cur);
+  if(t.dataset.ready){
+    t.disabled=true;
+    try{
+      const r=await call('POST',API.ready,JSON.stringify({printer_ids:[t.dataset.ready]}));
+      const ok=((r&&r.successful_ids)||[]).includes(t.dataset.ready);
+      msg(ok?'Printer marked ready — it can take the next print from the queue.':'FlowQ could not mark that printer ready (it may be offline or busy).',ok?'ok':'err');
+    }catch(er){msg(er.message,'err')}
+    return refresh('printers');
+  }
+  if(t.dataset.op){
+    const id=t.dataset.task,it=+t.dataset.it;
+    try{
+      if(t.dataset.op==='del'){if(!confirm('Remove this task from the queue?'))return;await call('DELETE',API.tasks+'/'+id)}
+      else await call('PATCH',API.tasks+'/'+id,JSON.stringify({iterations:t.dataset.op==='inc'?it+1:it-1}));
+      msg('Queue updated.','ok');
+    }catch(er){msg(er.message,'err')}
+    return refresh('queue');
+  }
+}
+/*ENDP*/
+$('btnSettings').onclick=()=>$('settings').classList.toggle('hide');
+$('btnSave').onclick=()=>{save();msg('Settings saved.','ok')};
+$('btnLoad').onclick=load;$('btnDetect').onclick=detect;
+$('btnCopy').onclick=async()=>{const t=$('log').textContent;try{await navigator.clipboard.writeText(t);msg('Log copied — paste it into the chat.','ok')}catch(e){const r=document.createRange();r.selectNodeContents($('log'));const se=getSelection();se.removeAllRanges();se.addRange(r);msg('Log selected — press Ctrl+C, then paste it into the chat.','ok')}};
+$('btnDefaults').onclick=()=>{Object.assign(cfg,D);cfg.v=3;fill();save();msg('Default settings restored (your key was kept).','ok')};
+$('btnReset').onclick=()=>{total=0;ST.setItem('flowq-total',0);$('total').textContent=0};
+['files','printers','queue','filament'].forEach(t=>$('tab-'+t).onclick=()=>tab(t));
+document.addEventListener('click',e=>{const t=e.target.closest('button');if(t&&t.closest('main'))onAction(t)});
+document.addEventListener('error',e=>{const im=e.target;if(im&&im.tagName==='IMG'&&im.closest('.cam')){const d=document.createElement('div');d.className='m';d.style.marginBottom='6px';d.textContent='Camera not reachable — check the IP, access code, that the printer is on, and (Bambu) that LAN Mode Liveview is on.';im.replaceWith(d)}},true);
+document.addEventListener('change',async e=>{const n=e.target.dataset&&e.target.dataset.cam;if(n!==undefined){await setCam(n,e.target.value.trim());msg('Camera saved.','ok');refresh('printers')}});
+setInterval(()=>{const a=document.activeElement;if(cur==='printers'&&!document.hidden&&cfg.key&&!(a&&a.tagName==='INPUT'))refresh('printers')},15000);
+fill();if(!cfg.key)$('settings').classList.remove('hide');
+</script>
+</body>
+</html>
